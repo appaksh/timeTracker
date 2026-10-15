@@ -8,6 +8,21 @@ Add tasks and start runs with a target in minutes. Starting a run stops the prev
 
 Data is stored in localStorage for this browser and origin. Use Export backup regularly, and Restore backup to move data or recover it. Clearing browser data removes the local copy. Storage failures are shown and changes are not applied when saving fails. Optional Google Drive snapshots are described below; live cross-device synchronization and manual time editing are not included. Use one tab for mutations: storage events refresh other tabs, but simultaneous edits in multiple tabs are not transactionally coordinated. Clock adjustments affect elapsed time. Fonts fall back to system sans-serif when offline.
 
+## Selectable local folder
+
+Under **Storage location**, choose a folder in a supported desktop browser (Chrome or Edge). Tempo uses `tempo-data.json` in that folder:
+
+- If the file already exists, validate and load it before enabling folder autosave. If it differs from this browser's data, loading requires confirmation. Cancel to keep the browser copy; export it first if you need both copies.
+- If the folder has no data file, create it using the current browser's tasks and runs.
+- Every successful task/timer change saves to browser storage immediately, then queues a folder write. Wait for **Saved to folder** before closing or switching versions. Active time is timestamp-based and needs no per-second disk writes.
+- **Save now** writes the current browser data. **Reload folder data** reads changes from the other version. **Use browser storage only** disconnects without deleting the file.
+
+Choose the same folder separately from localhost and the hosted site. Each origin remembers its folder handle in IndexedDB, but the browser may require **Reconnect folder** after reopening. The browser exposes the folder name rather than an editable absolute path. An HTTPS host or localhost is required. Unsupported browsers keep browser storage and manual JSON export/restore available.
+
+Use only one app window/version at a time. External changes are checked before each write and when returning to the tab; detected changes pause folder saving, while new changes remain in browser storage. This is conflict detection, not a cross-origin database transaction: truly simultaneous writers are not supported. Deleted/corrupt files, revoked permission, and disk failures do not trigger automatic replacement of existing data. Reconnect and resolve the folder state explicitly. No files leave your device through the local-folder feature.
+
+For GitHub Pages, upload `folder.js` and `folder-ui.js` along with the updated `app.js`, `index.html`, and `style.css`. No server or package changes are needed on Pages. Restart the local Node server to pick up its new module routes.
+
 ## Google Drive backups
 
 Use **Connect Google Drive** in the app to configure Google authorization. This is snapshot backup and restore for one device at a time, not live synchronization. Local autosave continues independently of Google.

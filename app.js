@@ -1,13 +1,14 @@
 import {emptyState,activeRun,elapsed,taskElapsed,addTask,startRun,stopRun,completeTask,parseState} from './model.js';
 import {setupDrive} from './drive-ui.js';
+import {setupFolder} from './folder-ui.js';
 const $=id=>document.getElementById(id), KEY='tempo.time-tracker.v1';
-let state=emptyState(),pending=null,writable=true;
+let state=emptyState(),pending=null,writable=true,folderStorage=null;
 function notice(message) {$('notice').textContent=message; $('notice').hidden=!message;}
 try {const raw=localStorage.getItem(KEY); if(raw) state=parseState(raw);} catch {writable=false;notice('Saved data could not be read. Export a backup or restore a valid backup before making changes.');}
 const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function duration(ms){const s=Math.floor(ms/1000);return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(n=>String(n).padStart(2,'0')).join(':');}
 const date=n=>new Date(n).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
-function change(fn,restore=false) { if(!writable&&!restore)return notice('Restore a valid backup to unlock changes. Existing saved data has been preserved.'); const draft=structuredClone(state); try {fn(draft);localStorage.setItem(KEY,JSON.stringify(draft));state=draft;writable=true;notice('');render();return true;}catch(e){notice('Changes were not saved: '+e.message);return false;} }
+function change(fn,restore=false,fromFolder=false) { if(!fromFolder&&folderStorage&&!folderStorage.canEdit()){notice('Please wait for the storage location to finish loading.');return false;} if(!writable&&!restore)return notice('Restore a valid backup to unlock changes. Existing saved data has been preserved.'); const draft=structuredClone(state); try {fn(draft);localStorage.setItem(KEY,JSON.stringify(draft));state=draft;writable=true;notice('');render();if(!fromFolder)folderStorage?.changed();return true;}catch(e){notice('Changes were not saved: '+e.message);return false;} }
 function tick(){const now=Date.now(),run=activeRun(state);$('summary').innerHTML=`<strong>${duration(state.runs.reduce((sum,r)=>sum+elapsed(r,now),0))}</strong><span>TOTAL TIME TRACKED</span>`;
   $('timer').textContent=duration(run?elapsed(run,now):0);
   if(run){const spent=elapsed(run,now),over=spent>run.targetMs;$('progress-fill').style.width=Math.min(100,spent/run.targetMs*100)+'%';$('goal-text').textContent=over?`${duration(spent-run.targetMs)} beyond target · keep going`:`${duration(Math.max(0,run.targetMs-spent))} to target · ${run.targetMs/60000} min goal`;$('percent').textContent=Math.floor(spent/run.targetMs*100)+'%';$('session-state').textContent=over?'↗ Overtime':'● In focus';}
@@ -25,4 +26,5 @@ $('export').onclick=()=>{const blob=new Blob([JSON.stringify(state,null,2)],{typ
 $('import').onclick=()=>$('import-file').click();$('import-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const imported=parseState(await file.text());if(confirm('Replace current tasks and runs with this backup? Export your current data first if you need to keep it.'))change(s=>Object.assign(s,imported),true);}catch(err){notice('Backup could not be restored: '+err.message);}e.target.value='';};
 addEventListener('storage',e=>{if(e.key===KEY){try{state=e.newValue?parseState(e.newValue):emptyState();writable=true;render();}catch{writable=false;notice('Saved data in another tab could not be read. Reload or restore a valid backup.');}}});
 setInterval(tick,1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)render();});render();
+folderStorage=setupFolder({getState:()=>state,canSave:()=>writable,replaceState:data=>change(s=>Object.assign(s,data),true,true)});
 setupDrive({getState:()=>state,canBackup:()=>writable,restoreState:data=>change(s=>Object.assign(s,data),true)});
