@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-const files = {'/':'index.html','/app.js':'app.js','/model.js':'model.js','/drive.js':'drive.js','/drive-ui.js':'drive-ui.js','/style.css':'style.css'};
+const files = {'/':'index.html','/app.js':'app.js','/model.js':'model.js','/drive.js':'drive.js','/drive-ui.js':'drive-ui.js','/folder.js':'folder.js','/folder-ui.js':'folder-ui.js','/style.css':'style.css'};
 const types = {html:'text/html',js:'text/javascript',css:'text/css'};
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
