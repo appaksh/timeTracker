@@ -53,10 +53,10 @@ function ui(t,{dir=null,permission='granted',accept=true,supported=true,pickerEr
   const events={};let local=emptyState(), remembered=dir;
   function replace(name,value) {const descriptor=Object.getOwnPropertyDescriptor(globalThis,name);Object.defineProperty(globalThis,name,{configurable:true,writable:true,value});t.after(()=>{if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];});}
   const picked=dir||directory();picked.permission=permission;
-  replace('window',supported?{showDirectoryPicker:async()=>{if(pickerError)throw pickerError;return picked;}}:{});
+  replace('window',supported?{showDirectoryPicker:async()=>{if(pickerError)throw pickerError;return picked;},addEventListener:(name,fn)=>{events[name]=fn;}}:{});
   replace('document',{getElementById:element,hidden:false,addEventListener:(name,fn)=>{events[name]=fn;}});
   replace('confirm',()=>accept);
-  const controller=setupFolder({getState:()=>local,canSave:()=>true,replaceState:s=>{local=s;return true;},preferences:async(action,handle)=>{if(action==='get')return remembered;if(action==='set')remembered=handle;else remembered=null;}});
+  const controller=setupFolder({getState:()=>local,canSave:()=>true,replaceState:s=>{local=s;return true;},schedule:(fn,ms)=>{assert.equal(ms,2000);events.poll=fn;},preferences:async(action,handle)=>{if(action==='get')return remembered;if(action==='set')remembered=handle;else remembered=null;}});
   return {element,controller,picked,events,get local(){return local;},set local(s){local=s;},get remembered(){return remembered;}};
 }
 test('folder UI loads existing data and queues rapid changes without losing the latest state',async t=>{
@@ -67,10 +67,10 @@ test('folder UI loads existing data and queues rapid changes without losing the 
   await Promise.all([first,last]);assert.deepEqual(JSON.parse(setup.picked.content),sample('Latest'));
   assert.match(setup.element('folder-status').textContent,/Saved to folder/);
   setup.picked.content=JSON.stringify(sample('External'));
-  setup.events.visibilitychange();await settle();
-  assert.match(setup.element('folder-status').textContent,/changed while/);
-  await setup.controller.changed();assert.equal(JSON.parse(setup.picked.content).tasks[0].name,'External');
-  await setup.element('folder-resume').onclick();assert.equal(setup.local.tasks[0].name,'External');
+  await setup.events.visibilitychange();
+  assert.match(setup.element('folder-status').textContent,/Updated from folder/);
+  assert.equal(setup.local.tasks[0].name,'External');
+  assert.equal(setup.picked.writes,2,'refresh must not write stale data back');
 });
 test('choose and disconnect retain the file and the current browser copy',async t=>{
   const setup=ui(t);await settle();setup.local=sample();
@@ -109,4 +109,28 @@ test('file-access AbortError keeps the selected folder visible and offers reconn
   assert.equal(setup.element('folder-name').textContent,'My time / tempo-data.json');
   assert.match(setup.element('folder-status').textContent,/File access aborted/);
   assert.equal(setup.element('folder-resume').hidden,false);
+});
+test('visible tabs poll for external changes and focus refreshes active timers',async t=>{
+  const setup=ui(t,{dir:directory(JSON.stringify(sample()))});await settle();
+  setup.picked.content=JSON.stringify(sample('Polled'));
+  await setup.events.poll();assert.equal(setup.local.tasks[0].name,'Polled');
+  setup.picked.content=JSON.stringify(sample('Focused'));
+  await setup.events.focus();assert.equal(setup.local.tasks[0].name,'Focused');
+  assert.equal(activeRun(setup.local).start,100);assert.equal(setup.picked.writes,0);
+});
+test('automatic refresh preserves unsaved browser edits on conflict',async t=>{
+  const setup=ui(t,{dir:directory(JSON.stringify(sample()))});await settle();
+  setup.local=sample('Unsaved browser');setup.picked.content=JSON.stringify(sample('External'));
+  await setup.events.poll();assert.equal(setup.local.tasks[0].name,'Unsaved browser');
+  assert.match(setup.element('folder-status').textContent,/Both the browser and folder have changes/);
+  assert.equal(setup.element('folder-save').hidden,true);assert.equal(setup.picked.writes,0);
+});
+test('automatic refresh pauses on corrupt data or revoked permission',async t=>{
+  const setup=ui(t,{dir:directory(JSON.stringify(sample()))});await settle();
+  setup.picked.content='{invalid';await setup.events.poll();
+  assert.deepEqual(setup.local,sample());assert.match(setup.element('folder-status').textContent,/refresh paused/);
+  setup.picked.content=JSON.stringify(sample());await setup.element('folder-resume').onclick();
+  setup.picked.permission='prompt';await setup.events.focus();
+  assert.match(setup.element('folder-status').textContent,/permission is needed/);
+  assert.equal(setup.picked.writes,0);
 });

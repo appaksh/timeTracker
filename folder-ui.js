@@ -1,8 +1,9 @@
 import {FolderStore, DATA_FILE, rememberFolder} from './folder.js';
 
-export function setupFolder({getState, replaceState, canSave, preferences = rememberFolder}) {
+export function setupFolder({getState, replaceState, canSave, preferences = rememberFolder, schedule = (fn, ms) => window.setInterval?.(fn, ms)}) {
   const $ = id => document.getElementById(id);
   let store = null, connected = false, busy = true, queue = Promise.resolve(), saving = 0;
+  let syncedState = null;
   const supported = typeof window.showDirectoryPicker === 'function';
   function message(text) { $('folder-status').textContent = text; }
   function render() {
@@ -37,6 +38,7 @@ export function setupFolder({getState, replaceState, canSave, preferences = reme
       await candidate.write(getState());
     }
     store = candidate; connected = true;
+    syncedState = JSON.stringify(getState());
     message('Folder connected. Task and timer changes save automatically. Use only one app window at a time.');
     return true;
   }
@@ -49,6 +51,7 @@ export function setupFolder({getState, replaceState, canSave, preferences = reme
       try {
         if (!canSave()) throw Error('Browser data cannot be read. Folder saving is paused.');
         await target.write(snapshot);
+        syncedState = JSON.stringify(snapshot);
         message(`Saved to folder at ${new Date().toLocaleTimeString()}.`);
       } catch (error) {
         connected = false; message(`${error.message} Your latest changes remain in this browser. Reconnect or reload the folder before resuming.`);
@@ -104,16 +107,33 @@ export function setupFolder({getState, replaceState, canSave, preferences = reme
     } catch (error) { connected = false; message('Folder could not be reopened: ' + error.message + ' Browser storage remains available.'); }
     finally { busy = false; render(); }
   })();
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && connected && !busy && !saving) {
-      action(async () => {
-        if (await store.raw() !== store.expected) {
+  async function refresh() {
+    if (document.hidden || !connected || busy || saving) return;
+    await action(async () => {
+      try {
+        if (await store.directory.queryPermission({mode:'readwrite'}) !== 'granted') {
           connected = false;
-          message('The folder file changed while this app was away. Reload folder data before continuing. Browser changes will not overwrite it.');
+          message('Folder permission is needed. Click Reconnect folder. Changes continue to save in this browser.');
+          return;
         }
-      });
-    }
-  });
+        const candidate = new FolderStore(store.directory);
+        const data = await candidate.read();
+        if (candidate.expected === store.expected) return;
+        if (!data) throw Error('The folder data file was removed. Reconnect to choose how to continue.');
+        if (JSON.stringify(getState()) !== syncedState) throw Error('Both the browser and folder have changes. Export your browser copy, then reload the folder data to resolve the conflict.');
+        if (!replaceState(data)) throw Error('Updated folder data could not be saved in this browser.');
+        store = candidate;
+        syncedState = JSON.stringify(data);
+        message(`Updated from folder at ${new Date().toLocaleTimeString()}. Changes save automatically.`);
+      } catch (error) {
+        connected = false;
+        message(`Automatic folder refresh paused: ${error.message} Browser data is preserved.`);
+      }
+    });
+  }
+  document.addEventListener('visibilitychange', refresh);
+  window.addEventListener?.('focus', refresh);
+  schedule(refresh, 2000);
   window.addEventListener?.('beforeunload', event => {
     if (saving > 0) { event.preventDefault(); event.returnValue = ''; }
   });
